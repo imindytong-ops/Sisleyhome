@@ -1,0 +1,78 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client"
+  output   = "../app/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+// role: PURCHASING | WAREHOUSE | FINANCE | ADMIN (SQLite has no enum type)
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  passwordHash String
+  role         String
+  createdAt    DateTime @default(now())
+
+  purchaseOrders PurchaseOrder[] @relation("PurchaseOrderCreatedBy")
+  documents      Document[]      @relation("DocumentUploadedBy")
+}
+
+model Supplier {
+  id        String   @id @default(cuid())
+  name      String
+  contact   String?
+  taxNo     String?
+  createdAt DateTime @default(now())
+
+  purchaseOrders PurchaseOrder[]
+}
+
+// status: DRAFT | CONFIRMED | CANCELLED
+model PurchaseOrder {
+  id          String   @id @default(cuid())
+  orderNo     String   @unique
+  supplierId  String
+  orderDate   DateTime
+  totalAmount Decimal
+  status      String   @default("DRAFT")
+  createdById String
+  createdAt   DateTime @default(now())
+
+  supplier  Supplier            @relation(fields: [supplierId], references: [id])
+  createdBy User                @relation("PurchaseOrderCreatedBy", fields: [createdById], references: [id])
+  items     PurchaseOrderItem[]
+  documents Document[]
+}
+
+model PurchaseOrderItem {
+  id          String @id @default(cuid())
+  poId        String
+  productName String
+  quantity    Decimal
+  unitPrice   Decimal
+  amount      Decimal
+
+  purchaseOrder PurchaseOrder @relation(fields: [poId], references: [id], onDelete: Cascade)
+}
+
+// type: INVOICE | DELIVERY_NOTE | STOCK_IN | STOCK_OUT
+// ocrStatus: PENDING | RECOGNIZED | CONFIRMED | FAILED
+model Document {
+  id           String   @id @default(cuid())
+  type         String
+  fileUrl      String
+  ocrRawJson   String?
+  ocrStatus    String   @default("PENDING")
+  uploadedById String
+  relatedPoId  String?
+  createdAt    DateTime @default(now())
+
+  uploadedBy    User           @relation("DocumentUploadedBy", fields: [uploadedById], references: [id])
+  purchaseOrder PurchaseOrder? @relation(fields: [relatedPoId], references: [id])
+}
