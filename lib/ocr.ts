@@ -1,6 +1,5 @@
-import Anthropic from "@anthropic-ai/sdk";
-
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+const ZHIPU_ENDPOINT = "https://open.bigmodel.cn/api/paas/v4/chat/completions";
+const ZHIPU_MODEL = "glm-4.6v";
 
 export type OcrItem = {
   productName: string;
@@ -16,70 +15,71 @@ export type OcrResult = {
   totalAmount: number | null;
 };
 
-const EXTRACT_TOOL = {
-  name: "extract_document",
-  description: "提取采购单据（发票/送货单/采购订单）中的结构化信息",
-  input_schema: {
-    type: "object" as const,
-    properties: {
-      documentNo: { type: ["string", "null"], description: "单据编号/发票号，找不到则为 null" },
-      supplierName: { type: ["string", "null"], description: "供应商/开票方名称" },
-      documentDate: {
-        type: ["string", "null"],
-        description: "单据日期，格式 YYYY-MM-DD，找不到则为 null",
-      },
-      items: {
-        type: "array",
-        description: "商品明细列表",
-        items: {
-          type: "object",
-          properties: {
-            productName: { type: "string" },
-            quantity: { type: "number" },
-            unitPrice: { type: "number" },
-          },
-          required: ["productName", "quantity", "unitPrice"],
-        },
-      },
-      totalAmount: { type: ["number", "null"], description: "单据总金额，找不到则为 null" },
-    },
-    required: ["documentNo", "supplierName", "documentDate", "items", "totalAmount"],
-  },
-};
+const PROMPT = `这是一张采购相关单据（可能是发票、送货单或采购订单）的照片/截图。请识别其中的信息，只输出一个 JSON 对象，不要输出任何其他文字或 markdown 代码块标记，JSON 结构如下：
+{
+  "documentNo": string | null,   // 单据编号/发票号，找不到则为 null
+  "supplierName": string | null, // 供应商/开票方名称
+  "documentDate": string | null, // 单据日期，格式 YYYY-MM-DD，找不到则为 null
+  "items": [
+    { "productName": string, "quantity": number, "unitPrice": number }
+  ],
+  "totalAmount": number | null   // 单据总金额，找不到则为 null
+}
+数字字段无法确定时使用 null，不要编造数据。`;
+
+function parseJsonFromModelOutput(text: string): OcrResult {
+  const cleaned = text
+    .trim()
+    .replace(/^```(?:json)?/i, "")
+    .replace(/```$/, "")
+    .trim();
+  return JSON.parse(cleaned);
+}
 
 export async function recognizeDocument(
   imageBase64: string,
   mediaType: "image/jpeg" | "image/png" | "image/webp"
 ): Promise<OcrResult> {
-  const message = await client.messages.create({
-    model: "claude-sonnet-5",
-    max_tokens: 2048,
-    tools: [EXTRACT_TOOL],
-    tool_choice: { type: "tool", name: "extract_document" },
-    messages: [
-      {
-        role: "user",
-        content: [
-          {
-            type: "image",
-            source: { type: "base64", media_type: mediaType, data: imageBase64 },
-          },
-          {
-            type: "text",
-            text: "这是一张采购相关单据（可能是发票、送货单或采购订单）的照片/截图。请识别其中的供应商名称、单据编号、日期，以及商品明细（名称、数量、单价）。数字字段无法确定时使用 null，不要编造数据。",
-          },
-        ],
-      },
-    ],
-  });
-
-  const toolUse = message.content.find(
-    (block): block is Anthropic.ToolUseBlock => block.type === "tool_use"
-  );
-
-  if (!toolUse) {
-    throw new Error("OCR 识别未返回结构化结果");
+  const apiKey = process.env.ZHIPU_API_KEY;
+  if (!apiKey) {
+    throw new Error("ZHIPU_API_KEY 未配置");
   }
 
-  return toolUse.input as OcrResult;
+  const res = await fetch(ZHIPU_ENDPOINT, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: ZHIPU_MODEL,
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "image_url",
+              image_url: { url: `data:${mediaType};base64,${imageBase64}` },
+            },
+            { type: "text", text: PROMPT },
+          ],
+        },
+      ],
+      temperature: 0.1,
+      max_tokens: 2048,
+    }),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`智谱 API 调用失败 (${res.status}): ${errText}`);
+  }
+
+  const data = await res.json();
+  const content = data?.choices?.[0]?.message?.content;
+  if (typeof content !== "string") {
+    throw new Error("OCR 识别未返回有效结果");
+  }
+
+  return parseJsonFromModelOutput(content);
 }

@@ -18,9 +18,9 @@ export async function POST(request: Request) {
   const { session, error } = await requireRole(["PURCHASING", "ADMIN"]);
   if (error) return error;
 
-  if (!process.env.ANTHROPIC_API_KEY) {
+  if (!process.env.ZHIPU_API_KEY) {
     return NextResponse.json(
-      { error: "服务器未配置 ANTHROPIC_API_KEY，无法使用识别功能" },
+      { error: "服务器未配置 ZHIPU_API_KEY，无法使用识别功能" },
       { status: 500 }
     );
   }
@@ -68,7 +68,8 @@ export async function POST(request: Request) {
       data: { ocrStatus: "RECOGNIZED", ocrRawJson: JSON.stringify(result) },
     });
     return NextResponse.json({ documentId: document.id, fileUrl, result });
-  } catch {
+  } catch (err) {
+    console.error("OCR recognition failed:", err);
     await prisma.document.update({
       where: { id: document.id },
       data: { ocrStatus: "FAILED" },
