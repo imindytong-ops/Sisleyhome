@@ -49,10 +49,14 @@ export default function PurchaseUploadPage() {
         supplierName: data.result.supplierName ?? "",
         orderDate: data.result.documentDate ?? undefined,
         items: (data.result.items ?? []).map(
-          (it: { productName: string; quantity: number; unitPrice: number }) => ({
-            productName: it.productName,
-            quantity: it.quantity,
-            unitPrice: it.unitPrice,
+          (it: {
+            productName: string | null;
+            quantity: number | null;
+            unitPrice: number | null;
+          }) => ({
+            productName: it.productName ?? "",
+            quantity: it.quantity ?? 0,
+            unitPrice: it.unitPrice ?? 0,
           })
         ),
         documentId: data.documentId,
